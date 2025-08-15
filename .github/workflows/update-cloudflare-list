@@ -1,0 +1,62 @@
+name: Update cloudflare IP lists
+
+on:
+  workflow_dispatch: {} # Allow manual runs
+  schedule:
+    - cron: "*/30 * * * *" # Runs every 30 minutes
+
+permissions:
+  contents: write
+
+jobs:
+  update-cloudflare-list:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Generate cloudflare.list (IPv4) and cloudflare6.list (IPv6)
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          URL="https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/refs/heads/sing/geo/geoip/cloudflare.json"
+          OUT_V4="cloudflare.list"
+          OUT_V6="cloudflare6.list"
+
+          tmp_json="$(mktemp)"
+          curl -fsSL "$URL" -o "$tmp_json"
+
+          # Extract from rules[].ip_cidr[]; write IPv4 and IPv6 separately
+          jq -r '( .rules[]? | .ip_cidr? // [] )[] | select(contains(":") | not)' "$tmp_json" \
+            | sort -u > "$OUT_V4"
+
+          jq -r '( .rules[]? | .ip_cidr? // [] )[] | select(contains(":"))' "$tmp_json" \
+            | sort -u > "$OUT_V6"
+
+          rm -f "$tmp_json"
+
+          if [ ! -s "$OUT_V4" ] && [ ! -s "$OUT_V6" ]; then
+            echo "No IPs generated; aborting."
+            exit 1
+          fi
+
+      - name: Commit and push changes (if any)
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          # Ensure diff detects new files as well
+          git add -N cloudflare.list cloudflare6.list || true
+
+          if git diff --quiet -- cloudflare.list cloudflare6.list; then
+            echo "No changes to commit."
+            exit 0
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add cloudflare.list cloudflare6.list
+          git commit -m "chore: update cloudflare IP lists (IPv4 and IPv6) from MetaCubeX/meta-rules-dat"
+          git push
