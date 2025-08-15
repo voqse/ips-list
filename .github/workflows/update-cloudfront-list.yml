@@ -1,4 +1,4 @@
-name: Update CloudFront IPv4 list
+name: Update CloudFront IP lists
 
 on:
   workflow_dispatch: {} # Allow manual runs
@@ -16,22 +16,29 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v4
 
-      - name: Generate cloudfront.list from MetaCubeX meta-rules-dat
+      - name: Generate cloudfront.list (IPv4) and cloudfront6.list (IPv6)
         shell: bash
         run: |
           set -euo pipefail
 
           URL="https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/refs/heads/sing/geo/geoip/cloudfront.json"
-          OUT_FILE="cloudfront.list"
+          OUT_V4="cloudfront.list"
+          OUT_V6="cloudfront6.list"
 
-          # Extract IPv4 CIDRs from array rules[].ip_cidr[] and exclude IPv6 (with ':')
-          curl -fsSL "$URL" \
-            | jq -r '( .rules[]? | .ip_cidr? // [] )[] | select(contains(":") | not)' \
-            | sort -u \
-            > "$OUT_FILE"
+          tmp_json="$(mktemp)"
+          curl -fsSL "$URL" -o "$tmp_json"
 
-          if [ ! -s "$OUT_FILE" ]; then
-            echo "Generated $OUT_FILE is empty; aborting."
+          # Extract from rules[].ip_cidr[]; write IPv4 and IPv6 separately
+          jq -r '( .rules[]? | .ip_cidr? // [] )[] | select(contains(":") | not)' "$tmp_json" \
+            | sort -u > "$OUT_V4"
+
+          jq -r '( .rules[]? | .ip_cidr? // [] )[] | select(contains(":"))' "$tmp_json" \
+            | sort -u > "$OUT_V6"
+
+          rm -f "$tmp_json"
+
+          if [ ! -s "$OUT_V4" ] && [ ! -s "$OUT_V6" ]; then
+            echo "No IPs generated; aborting."
             exit 1
           fi
 
@@ -40,16 +47,16 @@ jobs:
         run: |
           set -euo pipefail
 
-          # Ensure diff detects new file as well
-          git add -N cloudfront.list || true
+          # Ensure diff detects new files as well
+          git add -N cloudfront.list cloudfront6.list || true
 
-          if git diff --quiet -- cloudfront.list; then
+          if git diff --quiet -- cloudfront.list cloudfront6.list; then
             echo "No changes to commit."
             exit 0
           fi
 
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add cloudfront.list
-          git commit -m "chore: update cloudfront.list from MetaCubeX/meta-rules-dat"
+          git add cloudfront.list cloudfront6.list
+          git commit -m "chore: update CloudFront IP lists (IPv4 and IPv6) from MetaCubeX/meta-rules-dat"
           git push
