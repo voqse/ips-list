@@ -24,11 +24,9 @@ jobs:
           URL="https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/refs/heads/sing/geo/geoip/cloudfront.json"
           OUT_FILE="cloudfront.list"
 
-          # Fetch and extract IPv4 CIDRs from rules.ip_cidr, exclude IPv6 (with ':'),
-          # sort and deduplicate.
+          # Extract IPv4 CIDRs from array rules[].ip_cidr[] and exclude IPv6 (with ':')
           curl -fsSL "$URL" \
-            | jq -r '.rules.ip_cidr? // [] | .[]' \
-            | grep -v ':' \
+            | jq -r '( .rules[]? | .ip_cidr? // [] )[] | select(contains(":") | not)' \
             | sort -u \
             > "$OUT_FILE"
 
@@ -43,7 +41,7 @@ jobs:
           set -euo pipefail
 
           # Ensure diff detects new file as well
-          git add -N cloudfront.list
+          git add -N cloudfront.list || true
 
           if git diff --quiet -- cloudfront.list; then
             echo "No changes to commit."
