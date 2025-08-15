@@ -1,7 +1,7 @@
 name: Update CloudFront IPv4 list
 
 on:
-  workflow_dispatch:
+  workflow_dispatch: {} # Allow manual runs
   schedule:
     - cron: "*/30 * * * *" # Runs every 30 minutes
 
@@ -24,17 +24,13 @@ jobs:
           URL="https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/refs/heads/sing/geo/geoip/cloudfront.json"
           OUT_FILE="cloudfront.list"
 
-          tmp_json="$(mktemp)"
-          curl -fsSL "$URL" -o "$tmp_json"
-
-          # Extract IPv4 CIDRs from rules.ip_cidr (fallback to payload if present),
-          # filter out anything containing a colon (IPv6), sort and deduplicate.
-          jq -r '( ( .rules.ip_cidr? // [] ) + ( .payload? // [] ) ) | .[]' "$tmp_json" \
+          # Fetch and extract IPv4 CIDRs from rules.ip_cidr, exclude IPv6 (with ':'),
+          # sort and deduplicate.
+          curl -fsSL "$URL" \
+            | jq -r '.rules.ip_cidr? // [] | .[]' \
             | grep -v ':' \
             | sort -u \
             > "$OUT_FILE"
-
-          rm -f "$tmp_json"
 
           if [ ! -s "$OUT_FILE" ]; then
             echo "Generated $OUT_FILE is empty; aborting."
@@ -45,6 +41,9 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+
+          # Ensure diff detects new file as well
+          git add -N cloudfront.list
 
           if git diff --quiet -- cloudfront.list; then
             echo "No changes to commit."
