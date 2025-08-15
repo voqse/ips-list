@@ -1,0 +1,58 @@
+name: Update CloudFront IPv4 list
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "*/30 * * * *" # Runs every 30 minutes
+
+permissions:
+  contents: write
+
+jobs:
+  update-cloudfront-list:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Generate cloudfront.list from MetaCubeX meta-rules-dat
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          URL="https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/refs/heads/sing/geo/geoip/cloudfront.json"
+          OUT_FILE="cloudfront.list"
+
+          tmp_json="$(mktemp)"
+          curl -fsSL "$URL" -o "$tmp_json"
+
+          # Extract IPv4 CIDRs from rules.ip_cidr (fallback to payload if present),
+          # filter out anything containing a colon (IPv6), sort and deduplicate.
+          jq -r '( ( .rules.ip_cidr? // [] ) + ( .payload? // [] ) ) | .[]' "$tmp_json" \
+            | grep -v ':' \
+            | sort -u \
+            > "$OUT_FILE"
+
+          rm -f "$tmp_json"
+
+          if [ ! -s "$OUT_FILE" ]; then
+            echo "Generated $OUT_FILE is empty; aborting."
+            exit 1
+          fi
+
+      - name: Commit and push changes (if any)
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if git diff --quiet -- cloudfront.list; then
+            echo "No changes to commit."
+            exit 0
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add cloudfront.list
+          git commit -m "chore: update cloudfront.list from MetaCubeX/meta-rules-dat"
+          git push
